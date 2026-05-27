@@ -264,6 +264,64 @@ td.neg { color: var(--red); }
 .helper.ok { color: var(--muted); }
 .helper .accent { color: var(--gold); font-weight: 600; }
 
+.help {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border-2);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 6px;
+  position: relative;
+  text-align: center;
+  line-height: 14px;
+  vertical-align: middle;
+  user-select: none;
+  font-family: 'Manrope', sans-serif;
+  transition: background 0.12s, color 0.12s;
+}
+.help:hover, .help.active {
+  background: var(--gold);
+  color: var(--bg-2);
+}
+.help::after {
+  content: attr(data-tip);
+  display: none;
+  position: absolute;
+  top: 22px;
+  left: -4px;
+  background: var(--panel-2);
+  border: 1px solid var(--gold-dim);
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--text);
+  width: 240px;
+  z-index: 200;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: pre-line;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  font-family: 'JetBrains Mono', monospace;
+}
+.help:hover::after, .help.active::after { display: block; }
+
+.intro-panel p {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.7;
+  font-family: 'Manrope', sans-serif;
+}
+.intro-panel h2 { color: var(--gold); }
+.intro-panel h2::before { background: var(--gold); }
+
 @media (max-width: 540px) {
   body { padding: 10px; font-size: 13px; }
   header { padding: 12px 4px; }
@@ -273,6 +331,7 @@ td.neg { color: var(--red); }
   .summary { grid-template-columns: 1fr 1fr; }
   table { font-size: 11px; }
   th, td { padding: 7px 4px; }
+  .help::after { width: 200px; }
 }
 </style>
 </head>
@@ -280,30 +339,35 @@ td.neg { color: var(--red); }
 <div class="app">
   <header>
     <h1>Staged Entry · EV Calc</h1>
-    <span class="tag">v1.0</span>
+    <span class="tag">v1.1</span>
   </header>
+
+  <div class="panel intro-panel">
+    <h2>概要 <span class="help" data-tip="価格下落時に複数押し目で段階的にロングを仕込む戦略のEVシミュレーター。&#10;&#10;モデル動作:&#10;1. 価格がAに下落→Aでロングエントリー&#10;2. 反発確率pでTPに到達して全決済&#10;3. 反発失敗ならBへ下落、B追加エントリー&#10;4. 最終段階まで繰り返し、全段階失敗でSL発動&#10;&#10;SL価格は『全段階エントリー後の合計損失=最大損失』となる位置に自動逆算される。">?</span></h2>
+    <p>下落局面で複数押し目に分割エントリーする戦略の期待値を計算する。各エントリー地点での反発確率を仮定し、損益分岐反発率(BE確率)と各シナリオ別の期待損益を可視化する。各変数を調整してパラメータ感度を確認できる。</p>
+  </div>
 
   <div class="panel">
     <h2>キャピタル設定</h2>
     <div class="grid">
       <div class="field">
-        <label>総資金 ($)</label>
+        <label>総資金 ($) <span class="help" data-tip="戦略全体に投じる元手の合計額。各エントリーはこれを段階数で等分した額をマージンとして使う。例: $1000を3段階なら1回あたり$333のマージン。">?</span></label>
         <input type="number" id="capital" value="1000" step="100">
       </div>
       <div class="field">
-        <label>レバレッジ</label>
+        <label>レバレッジ <span class="help" data-tip="各ポジションの実効倍率。1ポジションのnotional = (総資金 ÷ 段階数) × レバレッジ。BTC perpは10〜25x、GC futuresは契約サイズ依存。">?</span></label>
         <input type="number" id="leverage" value="10" step="1">
       </div>
       <div class="field">
-        <label>段階数</label>
+        <label>段階数 <span class="help" data-tip="ロングエントリーを何段階に分けるか(2〜5)。段階を増やすと全段階を抜けてSLに到達する確率は指数的に下がる代わりに、各段階のポジションサイズが小さくなる。">?</span></label>
         <input type="number" id="numEntries" value="3" min="2" max="5" step="1">
       </div>
       <div class="field">
-        <label>最大損失 ($)</label>
+        <label>最大損失 ($) <span class="help" data-tip="全段階エントリー後にSLが発動した場合の許容損失額(価格ベース、手数料抜き)。この値を満たすSL価格が自動逆算される。実損は手数料分わずかに上回る。">?</span></label>
         <input type="number" id="maxLoss" value="1000" step="50">
       </div>
       <div class="field">
-        <label>手数料 (片道 %)</label>
+        <label>手数料 (片道 %) <span class="help" data-tip="1回の約定にかかる notional 比の手数料率(片道)。各ポジションはエントリーとエグジットの両方で課金される。&#10;&#10;参考値:&#10;BTC perp taker ≈ 0.05%&#10;BTC perp maker ≈ 0.02%&#10;GC futures は$/contract固定なのでnotional比に換算して入力。">?</span></label>
         <input type="number" id="feeRate" value="0.05" step="0.01" min="0">
       </div>
     </div>
@@ -313,11 +377,11 @@ td.neg { color: var(--red); }
     <h2>価格構造 (A基準)</h2>
     <div class="grid">
       <div class="field">
-        <label>利確 (Aから +%)</label>
+        <label>利確 (Aから +%) <span class="help" data-tip="最上段Aの価格を基準に、利確ラインを何%上に置くか。全段階のポジションはこの単一価格で同時決済される。下段ほどエントリー価格が低いため、TPまでの値幅は大きく利幅も増える。">?</span></label>
         <input type="number" id="tpPct" value="1.2" step="0.1">
       </div>
       <div class="field">
-        <label>各段階の押し幅 (%)</label>
+        <label>各段階の押し幅 (%) <span class="help" data-tip="隣接段階間の価格差。例えば0.5%ならB=A−0.5%、C=A−1.0%。&#10;&#10;上限は『最深エントリー到達時の累積損失が最大損失と一致する押し幅』。これを超えると最深段階が約定する前にSLに到達してしまうため、モデルが破綻する。">?</span></label>
         <input type="number" id="step" value="0.5" step="0.1">
         <div class="helper" id="stepLimit"></div>
       </div>
@@ -326,9 +390,8 @@ td.neg { color: var(--red); }
   </div>
 
   <div class="panel">
-    <h2>反発→TP到達確率 (%)</h2>
+    <h2>反発→TP到達確率 (%) <span class="help" data-tip="各地点で価格が到達したとき、SLに行かずTPまで戻る確率。&#10;&#10;残り(1−p)の確率で次の段階の価格まで下落する。最終段階でも反発しなかった場合はSLに到達して全ポジション一括損切り。&#10;&#10;各段階で確率を変えられるので、下段ほど高い反発率を仮定する『支持帯バイアス』のシミュレーションも可能。">?</span></h2>
     <div id="probInputs"></div>
-    <div class="note">各地点で価格が到達したとき、SLに行かずTPまで戻る確率。</div>
   </div>
 
   <div class="ev-banner">
@@ -356,32 +419,31 @@ td.neg { color: var(--red); }
     <h2>サマリー</h2>
     <div class="summary">
       <div class="metric">
-        <div class="label">勝率</div>
+        <div class="label">勝率 <span class="help" data-tip="いずれかの段階で反発しTPに到達する確率の合計。1 − 全段階失敗確率。">?</span></div>
         <div class="value pos" id="winRate">--</div>
       </div>
       <div class="metric">
-        <div class="label">負け率</div>
+        <div class="label">負け率 <span class="help" data-tip="全段階を抜けてSLに到達する確率。各段階の反発失敗確率の積 = (1−pA)(1−pB)(1−pC)...">?</span></div>
         <div class="value neg" id="lossRate">--</div>
       </div>
       <div class="metric">
-        <div class="label">EV / 資金</div>
+        <div class="label">EV / 資金 <span class="help" data-tip="期待値を総資金で割った%。1トレードあたりの平均リターン率。長期的にこの%で資金が成長(または減少)する。">?</span></div>
         <div class="value" id="evPct">--</div>
       </div>
       <div class="metric">
-        <div class="label">平均利益 (勝ち時)</div>
+        <div class="label">平均利益 (勝ち時) <span class="help" data-tip="勝ち抜けた全シナリオの加重平均利益(手数料込み)。実トレードで勝てた場合に期待される平均利幅。">?</span></div>
         <div class="value pos" id="avgWin">--</div>
       </div>
       <div class="metric">
-        <div class="label">最大損失</div>
+        <div class="label">最大損失 <span class="help" data-tip="全段階失敗→SL発動時の実損(手数料込み)。設定した『最大損失』に往復手数料が加算された額。">?</span></div>
         <div class="value neg" id="avgLoss">--</div>
       </div>
       <div class="metric">
-        <div class="label">BE確率 (一律)</div>
+        <div class="label">BE確率 (一律) <span class="help" data-tip="全段階で同じ反発率を仮定したときに EV = 0 となる確率(損益分岐反発率)。&#10;&#10;実際の反発確率がこれを上回れば期待値プラス、下回れば期待値マイナス。&#10;&#10;戦略の最低限必要な精度ベンチマークとして使える。">?</span></div>
         <div class="value gold" id="breakeven">--</div>
       </div>
     </div>
     <div class="note">
-      <strong style="color:var(--gold)">BE確率</strong> = 全段階で同じ反発率を仮定したときに EV = 0 となる確率(損益分岐反発率)。実際の反発確率がこれを上回れば期待値プラス、下回れば期待値マイナス。<br>
       <strong>モデル前提</strong>: SL価格は全段階エントリー後の合計損失が最大損失と一致する位置に自動設定。SLは「全段階失敗」のシナリオでのみ発動。損益は手数料(片道%×2、エントリー時notional基準)込みで表示。
     </div>
   </div>
@@ -425,7 +487,12 @@ function buildProbInputs() {
     const div = document.createElement('div');
     div.className = 'field';
     const lbl = document.createElement('label');
-    lbl.innerHTML = `<span style="color:var(--gold);font-weight:700">${LABELS[i]}</span> 反発確率 %`;
+    const tip = i === 0
+      ? `価格が${LABELS[i]}(基準価格)に到達後、SLまで落ちずにTPまで戻る確率。残り(1-p)は${LABELS[i+1]}へ下落。`
+      : (i === n - 1
+        ? `価格が${LABELS[i]}(最深段階)に到達後、TPまで戻る確率。ここで失敗するとSLに到達。`
+        : `価格が${LABELS[i]}に到達後、TPまで戻る確率。残り(1-p)は${LABELS[i+1]}へ下落。`);
+    lbl.innerHTML = `<span style="color:var(--gold);font-weight:700">${LABELS[i]}</span> 反発確率 % <span class="help" data-tip="${tip}">?</span>`;
     const inp = document.createElement('input');
     inp.type = 'number';
     inp.dataset.idx = i;
@@ -585,6 +652,21 @@ document.getElementById('numEntries').addEventListener('input', () => {
   buildProbInputs();
   calculate();
 });
+
+// Tooltip toggle (works for both static and dynamic .help elements via delegation)
+document.addEventListener('click', (e) => {
+  const help = e.target.closest('.help');
+  if (help) {
+    e.stopPropagation();
+    document.querySelectorAll('.help.active').forEach(el => {
+      if (el !== help) el.classList.remove('active');
+    });
+    help.classList.toggle('active');
+  } else {
+    document.querySelectorAll('.help.active').forEach(el => el.classList.remove('active'));
+  }
+});
+
 buildProbInputs();
 calculate();
 </script>
