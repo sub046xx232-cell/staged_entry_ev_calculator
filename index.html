@@ -296,6 +296,50 @@ td.neg { color: var(--red); }
   font-variant-numeric: tabular-nums;
 }
 
+.tp-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.block-label {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  margin-bottom: 7px;
+}
+.toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.toggle button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 10px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0.02em;
+}
+.toggle button:first-child { border-right: 1px solid var(--border); }
+.toggle button.active {
+  background: var(--gold);
+  color: var(--bg-2);
+}
+.toggle button:not(.active):hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
 .note {
   font-size: 10.5px;
   color: var(--muted);
@@ -430,15 +474,24 @@ td.neg { color: var(--red); }
         <input type="number" id="priceA" value="3000" step="0.1" min="0">
       </div>
       <div class="field">
-        <label>利確 (Aから +%) <span class="help" data-tip="基準価格A(最初のエントリーポイント)を起点に、利確ラインを何%上に置くか。全段階のロングポジションはこの単一価格で同時決済される。下の段階(B, C等)ほどエントリー価格が低いため、TPまでの値幅は大きく利幅も増える。">?</span></label>
-        <input type="number" id="tpPct" value="1.2" step="0.1">
-      </div>
-      <div class="field">
         <label>各段階の押し幅 (%) <span class="help" data-tip="隣接段階間の価格差(下方向への押し幅)。例えば0.5%ならB=A−0.5%、C=A−1.0%。&#10;&#10;上限は『最後の段階(Cなど一番下のエントリー)に価格到達した時点で累積損失が最大損失と一致する押し幅』。これを超えると最後の段階が約定する前にSLに到達してしまうため、モデルが破綻する。">?</span></label>
         <input type="number" id="step" value="0.5" step="0.1">
         <div class="helper" id="stepLimit"></div>
       </div>
     </div>
+
+    <div class="tp-block">
+      <label class="block-label">利確モード <span class="help" data-tip="利確ラインの決め方を2モードで切替。&#10;&#10;【A価格から +%】&#10;基準価格Aから固定%上に利確ラインを置く。全建玉が同一価格で決済。下の段階ほど建値が低いので利幅は大きくなる。&#10;&#10;【建玉平均から +%】&#10;現在開いている建玉の平均建値に対して+%で利確。建玉が増えると平均建値が下がり、利確価格も下がる(=早く利確に届く)。各建玉が一律にこの%の含み益を得た時点で全決済。&#10;&#10;例: A+Bの2本を持つとき、A価格からではなくAB平均価格から+%の地点で利確。">?</span></label>
+      <div class="toggle" id="tpModeToggle">
+        <button type="button" data-mode="1" class="active">A価格から +%</button>
+        <button type="button" data-mode="2">建玉平均から +%</button>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>利確 (+%) <span class="help" data-tip="利確の目標%。モード1ではA価格からの上昇%、モード2では建玉平均価格からの含み益%として解釈される。">?</span></label>
+        <input type="number" id="tpPct" value="1.2" step="0.1">
+      </div>
+    </div>
+
     <div class="price-bar" id="priceBar"></div>
     <div class="callout-grid" id="slBox"></div>
   </div>
@@ -505,6 +558,7 @@ td.neg { color: var(--red); }
 
 <script>
 const LABELS = ['A','B','C','D','E'];
+let tpMode = 1;  // 1 = fixed % above A, 2 = % gain on combined position
 
 // Compute max allowed step% such that SL price is below the deepest entry.
 // Condition: total loss when price reaches deepest entry < maxLoss.
@@ -594,9 +648,6 @@ function calculate() {
     stepLimitEl.innerHTML = `上限 <span class="accent">${maxStep.toFixed(2)}%</span> (現在 ${currentStep.toFixed(2)}%)`;
   }
 
-  // Profit per entry if TP hit
-  const profitPerEntry = entries.map(e => (tpPrice - e) / e * notionalEach);
-
   // SL price such that sum of losses = maxLoss
   // sum_k notionalEach * (entries[k] - S)/entries[k] = maxLoss
   // n*notionalEach - notionalEach*S*sum(1/entries) = maxLoss
@@ -604,6 +655,30 @@ function calculate() {
   const sumInv = entries.reduce((s, e) => s + 1/e, 0);
   const slPrice = (n * notionalEach - maxLoss) / (notionalEach * sumInv);
   const slPctFromA = (1 - slPrice) * 100;
+
+  // Mode-aware helpers.
+  // Mode 1: TP is a fixed price (1 + tpPct) above A. Each position exits there.
+  // Mode 2: TP is tpPct% gain on the combined open position (avg entry × (1+tpPct)).
+  // Gross profit when positions 0..k are open and TP is hit:
+  function scenarioGrossProfit(k) {
+    if (tpMode === 2) {
+      // Total profit = total notional × tpPct = (k+1) × notionalEach × tpPct
+      return (k + 1) * notionalEach * tpPct;
+    }
+    let pf = 0;
+    for (let j = 0; j <= k; j++) pf += (tpPrice - entries[j]) / entries[j] * notionalEach;
+    return pf;
+  }
+  // TP price (relative to A) when positions 0..k are open
+  function scenarioTpPrice(k) {
+    if (tpMode === 2) {
+      let sumInvK = 0;
+      for (let j = 0; j <= k; j++) sumInvK += 1 / entries[j];
+      const avgEntry = (k + 1) / sumInvK;
+      return avgEntry * (1 + tpPct);
+    }
+    return tpPrice;
+  }
 
   // Round-trip fee per position (entry + exit, both on entry notional approximation)
   const feePerPos = 2 * feeRate * notionalEach;
@@ -613,8 +688,7 @@ function calculate() {
   let cumNoBounce = 1;
   for (let k = 0; k < n; k++) {
     const prob = cumNoBounce * probs[k];
-    let pf = 0;
-    for (let j = 0; j <= k; j++) pf += profitPerEntry[j];
+    const pf = scenarioGrossProfit(k);
     const fees = (k + 1) * feePerPos;
     scenarios.push({
       desc: `${LABELS[k]}で反発 → TP (${k+1}本約定)`,
@@ -639,14 +713,13 @@ function calculate() {
   const avgWin = winProb > 0 ? totalWinPnl / winProb : 0;
   const netMaxLoss = scenarios[scenarios.length - 1].pnl;  // includes fees
 
-  // Breakeven equal-p (fee-aware)
+  // Breakeven equal-p (fee-aware, mode-aware)
   let lo = 0, hi = 1;
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
     let evMid = 0, cum = 1;
     for (let k = 0; k < n; k++) {
-      let pf = 0;
-      for (let j = 0; j <= k; j++) pf += profitPerEntry[j];
+      const pf = scenarioGrossProfit(k);
       evMid += cum * mid * (pf - (k + 1) * feePerPos);
       cum *= (1 - mid);
     }
@@ -660,8 +733,18 @@ function calculate() {
   const showAbs = priceA > 0;
   const fmtPrice = p => p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const absTag = (relPrice) => showAbs ? `<span class="abs">$${fmtPrice(priceA * relPrice)}</span>` : '';
+  const pctStrFromA = (rel) => { const p = (rel - 1) * 100; return (p >= 0 ? '+' : '') + p.toFixed(2) + '%'; };
 
-  let pbHtml = `<div class="price-row tp"><span class="name">TP (利確)</span><span class="val">+${(tpPct*100).toFixed(2)}% ${absTag(tpPrice)}</span></div>`;
+  let pbHtml = '';
+  if (tpMode === 2) {
+    // TP varies by how many positions are open — show one line per depth
+    for (let k = 0; k < n; k++) {
+      const rel = scenarioTpPrice(k);
+      pbHtml += `<div class="price-row tp"><span class="name">TP (${k+1}本)</span><span class="val">${pctStrFromA(rel)} ${absTag(rel)}</span></div>`;
+    }
+  } else {
+    pbHtml += `<div class="price-row tp"><span class="name">TP (利確)</span><span class="val">+${(tpPct*100).toFixed(2)}% ${absTag(tpPrice)}</span></div>`;
+  }
   for (let i = 0; i < n; i++) {
     const pctFromA = (entries[i] - 1) * 100;
     const pctStr = pctFromA === 0 ? '±0.00%' : pctFromA.toFixed(2) + '%';
@@ -673,12 +756,15 @@ function calculate() {
   // Dedicated SL / TP price callout
   const slBox = document.getElementById('slBox');
   if (showAbs) {
+    const tpRelFull = scenarioTpPrice(n - 1);  // full-position TP
+    const tpLabel = tpMode === 2 ? `利確価格 (全${n}本時)` : '利確価格 (TP)';
+    const tpSub = tpMode === 2 ? `${pctStrFromA(tpRelFull)} from A (建玉平均+${(tpPct*100).toFixed(2)}%)` : `+${(tpPct*100).toFixed(2)}% from A`;
     slBox.style.display = 'grid';
     slBox.innerHTML = `
       <div class="callout tp-callout">
-        <div class="callout-label">利確価格 (TP)</div>
-        <div class="callout-price">$${fmtPrice(priceA * tpPrice)}</div>
-        <div class="callout-sub">+${(tpPct*100).toFixed(2)}% from A</div>
+        <div class="callout-label">${tpLabel}</div>
+        <div class="callout-price">$${fmtPrice(priceA * tpRelFull)}</div>
+        <div class="callout-sub">${tpSub}</div>
       </div>
       <div class="callout sl-callout">
         <div class="callout-label">損切価格 (SL)</div>
@@ -731,6 +817,17 @@ function calculate() {
 document.getElementById('numEntries').addEventListener('input', () => {
   buildProbInputs();
   calculate();
+});
+
+// TP mode toggle
+document.querySelectorAll('#tpModeToggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    tpMode = parseInt(btn.dataset.mode);
+    document.querySelectorAll('#tpModeToggle button').forEach(b => {
+      b.classList.toggle('active', b === btn);
+    });
+    calculate();
+  });
 });
 
 // Tooltip toggle (works for both static and dynamic .help elements via delegation)
