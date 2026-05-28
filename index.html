@@ -246,6 +246,55 @@ td.neg { color: var(--red); }
 .price-row.tp .val { color: var(--green); }
 .price-row.sl .val { color: var(--red); }
 .price-row .val { font-weight: 600; }
+.price-row .abs {
+  color: var(--gold);
+  margin-left: 8px;
+  font-weight: 700;
+}
+
+.callout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.callout {
+  border-radius: 6px;
+  padding: 14px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.tp-callout {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), transparent);
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.sl-callout {
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.1), transparent);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.callout-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.tp-callout .callout-label { color: var(--green); }
+.sl-callout .callout-label { color: var(--red); }
+.callout-price {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.tp-callout .callout-price { color: var(--green); }
+.sl-callout .callout-price { color: var(--red); }
+.callout-sub {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
 
 .note {
   font-size: 10.5px;
@@ -377,6 +426,10 @@ td.neg { color: var(--red); }
     <h2>価格構造 (A基準)</h2>
     <div class="grid">
       <div class="field">
+        <label>現価格 / A価格 ($) <span class="help" data-tip="最初のロングエントリーポイントAの価格(=基準価格)。これを入力すると、各段階のエントリー価格・利確(TP)・損切(SL)が実際の価格で表示される。&#10;&#10;0または空欄なら%表示のみ。GC gold や BTC perp の現在値を入れて、損切ラインがどこに来るか確認できる。">?</span></label>
+        <input type="number" id="priceA" value="3000" step="0.1" min="0">
+      </div>
+      <div class="field">
         <label>利確 (Aから +%) <span class="help" data-tip="基準価格A(最初のエントリーポイント)を起点に、利確ラインを何%上に置くか。全段階のロングポジションはこの単一価格で同時決済される。下の段階(B, C等)ほどエントリー価格が低いため、TPまでの値幅は大きく利幅も増える。">?</span></label>
         <input type="number" id="tpPct" value="1.2" step="0.1">
       </div>
@@ -387,6 +440,7 @@ td.neg { color: var(--red); }
       </div>
     </div>
     <div class="price-bar" id="priceBar"></div>
+    <div class="callout-grid" id="slBox"></div>
   </div>
 
   <div class="panel">
@@ -514,6 +568,7 @@ function calculate() {
   const n = parseInt(document.getElementById('numEntries').value) || 0;
   const maxLoss = parseFloat(document.getElementById('maxLoss').value) || 0;
   const feeRate = (parseFloat(document.getElementById('feeRate').value) || 0) / 100;
+  const priceA = parseFloat(document.getElementById('priceA').value) || 0;
   const tpPct = (parseFloat(document.getElementById('tpPct').value) || 0) / 100;
   const stepPct = (parseFloat(document.getElementById('step').value) || 0) / 100;
 
@@ -600,15 +655,40 @@ function calculate() {
   }
   const breakevenP = (lo + hi) / 2 * 100;
 
-  // Render price bar
+  // Render price bar (with absolute prices if priceA set)
   const priceBar = document.getElementById('priceBar');
-  let pbHtml = `<div class="price-row tp"><span class="name">TP</span><span class="val">+${(tpPct*100).toFixed(2)}%</span></div>`;
+  const showAbs = priceA > 0;
+  const fmtPrice = p => p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const absTag = (relPrice) => showAbs ? `<span class="abs">$${fmtPrice(priceA * relPrice)}</span>` : '';
+
+  let pbHtml = `<div class="price-row tp"><span class="name">TP (利確)</span><span class="val">+${(tpPct*100).toFixed(2)}% ${absTag(tpPrice)}</span></div>`;
   for (let i = 0; i < n; i++) {
     const pctFromA = (entries[i] - 1) * 100;
-    pbHtml += `<div class="price-row"><span class="name">${LABELS[i]} 建値</span><span class="val">${pctFromA === 0 ? '±0.00%' : pctFromA.toFixed(2) + '%'} (notional $${notionalEach.toFixed(0)})</span></div>`;
+    const pctStr = pctFromA === 0 ? '±0.00%' : pctFromA.toFixed(2) + '%';
+    pbHtml += `<div class="price-row"><span class="name">${LABELS[i]} 建値</span><span class="val">${pctStr} ${absTag(entries[i])}</span></div>`;
   }
-  pbHtml += `<div class="price-row sl"><span class="name">SL</span><span class="val">−${slPctFromA.toFixed(2)}%</span></div>`;
+  pbHtml += `<div class="price-row sl"><span class="name">SL (損切)</span><span class="val">−${slPctFromA.toFixed(2)}% ${absTag(slPrice)}</span></div>`;
   priceBar.innerHTML = pbHtml;
+
+  // Dedicated SL / TP price callout
+  const slBox = document.getElementById('slBox');
+  if (showAbs) {
+    slBox.style.display = 'grid';
+    slBox.innerHTML = `
+      <div class="callout tp-callout">
+        <div class="callout-label">利確価格 (TP)</div>
+        <div class="callout-price">$${fmtPrice(priceA * tpPrice)}</div>
+        <div class="callout-sub">+${(tpPct*100).toFixed(2)}% from A</div>
+      </div>
+      <div class="callout sl-callout">
+        <div class="callout-label">損切価格 (SL)</div>
+        <div class="callout-price">$${fmtPrice(priceA * slPrice)}</div>
+        <div class="callout-sub">−${slPctFromA.toFixed(2)}% from A</div>
+      </div>`;
+  } else {
+    slBox.style.display = 'none';
+    slBox.innerHTML = '';
+  }
 
   // Display
   const fmt = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -645,7 +725,7 @@ function calculate() {
 }
 
 // Bind events
-['capital','leverage','maxLoss','feeRate','tpPct','step'].forEach(id => {
+['capital','leverage','maxLoss','feeRate','priceA','tpPct','step'].forEach(id => {
   document.getElementById(id).addEventListener('input', calculate);
 });
 document.getElementById('numEntries').addEventListener('input', () => {
